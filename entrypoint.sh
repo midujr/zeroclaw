@@ -40,6 +40,7 @@ allow_public_bind = __PUBLIC__
 level = "supervised"
 workspace_only = true
 allowed_commands = ["ls", "cat", "grep", "echo"]
+forbidden_paths = ["/etc", "/root", "/proc", "/sys"]
 
 [runtime]
 kind = "native"
