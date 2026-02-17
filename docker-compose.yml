@@ -1,65 +1,40 @@
 ###############################################################################
-# ZeroClaw — Docker Compose for Timeweb App Platform
+# ZeroClaw — Docker Compose для Timeweb App Platform
+# Образ: ghcr.io/midujr/zeroclaw-timeweb:latest
 #
-# Ограничения Timeweb App Platform:
-#   - Нельзя использовать: volumes, privileged, cap_add, devices, ipc, pid,
-#     security_opt, userns_mode, sysctls, cgroup, cgroup_parent,
-#     device_cgroup_rules
-#   - Нельзя использовать порты 80 и 443 как хост-порты
-#   - Нельзя использовать network_mode: host
-#   - Проксирование только для первого сервиса
-#
-# Использование:
-#   1. Форкнуть репозиторий zeroclaw-labs/zeroclaw
-#   2. Заменить docker-compose.yml на этот файл
-#   3. Добавить Dockerfile.timeweb (см. ниже)
-#   4. В Timeweb: App Platform → Docker Compose → указать репозиторий
-#   5. Задать переменные окружения в панели Timeweb:
-#      - ZEROCLAW_API_KEY=sk-ваш-ключ
-#      - ZEROCLAW_PROVIDER=openrouter  (или openai, anthropic, etc.)
-#      - ZEROCLAW_MODEL=anthropic/claude-sonnet-4-20250514
-#
-# Логи: docker compose logs -f zeroclaw
+# Переменные задаются в панели Timeweb:
+#   ZEROCLAW_API_KEY=sk-ваш-ключ
+#   ZEROCLAW_PROVIDER=openrouter
+#   ZEROCLAW_MODEL=anthropic/claude-sonnet-4-20250514
 ###############################################################################
 
 services:
   zeroclaw:
-    build:
-      context: .
-      dockerfile: Dockerfile.timeweb
+    image: ghcr.io/midujr/zeroclaw-timeweb:latest
     ports:
       - "3000:3000"
     environment:
-      # --- Основные настройки (переопределяются через панель Timeweb) ---
       - ZEROCLAW_API_KEY=${ZEROCLAW_API_KEY:-}
       - ZEROCLAW_PROVIDER=${ZEROCLAW_PROVIDER:-openrouter}
       - ZEROCLAW_MODEL=${ZEROCLAW_MODEL:-anthropic/claude-sonnet-4-20250514}
       - ZEROCLAW_TEMPERATURE=${ZEROCLAW_TEMPERATURE:-0.7}
-      # --- Gateway ---
       - ZEROCLAW_GATEWAY_PORT=3000
-      - ZEROCLAW_GATEWAY_HOST=[::]
       - RUST_LOG=${RUST_LOG:-info,zeroclaw=debug}
       - RUST_BACKTRACE=1
-      # --- Отключаем pairing для облачного деплоя ---
       - ZEROCLAW_GATEWAY_REQUIRE_PAIRING=${ZEROCLAW_GATEWAY_REQUIRE_PAIRING:-false}
       - ZEROCLAW_GATEWAY_ALLOW_PUBLIC_BIND=${ZEROCLAW_GATEWAY_ALLOW_PUBLIC_BIND:-true}
-      # --- Memory ---
       - ZEROCLAW_MEMORY_BACKEND=${ZEROCLAW_MEMORY_BACKEND:-sqlite}
-      # --- Telegram (опционально) ---
       - ZEROCLAW_TELEGRAM_TOKEN=${ZEROCLAW_TELEGRAM_TOKEN:-}
       - ZEROCLAW_TELEGRAM_ALLOWED=${ZEROCLAW_TELEGRAM_ALLOWED:-}
-      # --- Discord (опционально) ---
       - ZEROCLAW_DISCORD_TOKEN=${ZEROCLAW_DISCORD_TOKEN:-}
       - ZEROCLAW_DISCORD_ALLOWED=${ZEROCLAW_DISCORD_ALLOWED:-}
     restart: unless-stopped
-    # Healthcheck — Timeweb использует его для проверки состояния
     healthcheck:
-      test: ["CMD", "/usr/local/bin/zeroclaw", "status"]
+      test: ["CMD", "zeroclaw", "status"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
-    # Логирование — всё в stdout/stderr для удобства отладки
+      start_period: 10s
     logging:
       driver: json-file
       options:
