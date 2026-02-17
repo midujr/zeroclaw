@@ -45,33 +45,24 @@ if [ -n "$ZEROCLAW_TEMPERATURE" ]; then
   sed -i "s|^default_temperature = .*|default_temperature = $ZEROCLAW_TEMPERATURE|" "$CONFIG"
 fi
 
-# Gateway — полностью перезаписываем секцию [gateway]
+# Gateway — перезаписываем через awk (надёжнее sed для многострочных секций)
 PAIRING="${ZEROCLAW_GATEWAY_REQUIRE_PAIRING:-false}"
 PUBLIC="${ZEROCLAW_GATEWAY_ALLOW_PUBLIC_BIND:-true}"
 PORT="${ZEROCLAW_GATEWAY_PORT:-3000}"
 
-# Удаляем старую секцию [gateway] и всё до следующей секции
-sed -i '/^\[gateway\]/,/^\[/{/^\[gateway\]/d;/^\[/!d}' "$CONFIG"
-
-# Вставляем новую секцию [gateway] перед [autonomy] или в конец
-if grep -q '^\[autonomy\]' "$CONFIG"; then
-  sed -i "/^\[autonomy\]/i\\
-[gateway]\\
-host = \"0.0.0.0\"\\
-port = ${PORT}\\
-require_pairing = ${PAIRING}\\
-allow_public_bind = ${PUBLIC}\\
-" "$CONFIG"
-else
-  cat >> "$CONFIG" <<EOF
-
-[gateway]
-host = "0.0.0.0"
-port = ${PORT}
-require_pairing = ${PAIRING}
-allow_public_bind = ${PUBLIC}
-EOF
-fi
+awk -v port="$PORT" -v pairing="$PAIRING" -v public="$PUBLIC" '
+  /^\[gateway\]/ {
+    print "[gateway]"
+    print "host = \"0.0.0.0\""
+    print "port = " port
+    print "require_pairing = " pairing
+    print "allow_public_bind = " public
+    skip=1
+    next
+  }
+  /^\[/ && skip { skip=0 }
+  !skip { print }
+' "$CONFIG" > "${CONFIG}.tmp" && mv "${CONFIG}.tmp" "$CONFIG"
 
 # ── Шаг 3: Добавляем каналы ────────────────────────────────────
 
@@ -84,7 +75,8 @@ if [ -n "$ZEROCLAW_TELEGRAM_TOKEN" ]; then
   else
     TG_USERS=$(echo "$TG_ALLOWED" | sed 's/[[:space:]]*,[[:space:]]*/","/g; s/^/["/; s/$/"]/')
   fi
-  sed -i '/\[channels_config\.telegram\]/,/^$/d' "$CONFIG"
+  # Удаляем старую секцию
+  awk '/^\[channels_config\.telegram\]/{skip=1;next} /^\[/{skip=0} !skip{print}' "$CONFIG" > "${CONFIG}.tmp" && mv "${CONFIG}.tmp" "$CONFIG"
   printf '\n[channels_config.telegram]\nbot_token = "%s"\nallowed_users = %s\n' \
     "$ZEROCLAW_TELEGRAM_TOKEN" "$TG_USERS" >> "$CONFIG"
 fi
@@ -98,7 +90,7 @@ if [ -n "$ZEROCLAW_DISCORD_TOKEN" ]; then
   else
     DC_USERS=$(echo "$DC_ALLOWED" | sed 's/[[:space:]]*,[[:space:]]*/","/g; s/^/["/; s/$/"]/')
   fi
-  sed -i '/\[channels_config\.discord\]/,/^$/d' "$CONFIG"
+  awk '/^\[channels_config\.discord\]/{skip=1;next} /^\[/{skip=0} !skip{print}' "$CONFIG" > "${CONFIG}.tmp" && mv "${CONFIG}.tmp" "$CONFIG"
   printf '\n[channels_config.discord]\nbot_token = "%s"\nallowed_users = %s\n' \
     "$ZEROCLAW_DISCORD_TOKEN" "$DC_USERS" >> "$CONFIG"
 fi
@@ -119,38 +111,18 @@ else
   exit 1
 fi
 
-# ── Шаг 6: Определяем и запускаем режим ────────────────────────
-COMMAND="${1:-auto}"
-shift 2>/dev/null || true
-
-if [ "$COMMAND" = "auto" ]; then
-  if [ -n "$ZEROCLAW_TELEGRAM_TOKEN" ] || [ -n "$ZEROCLAW_DISCORD_TOKEN" ]; then
-    COMMAND="daemon"
-  else
-    COMMAND="gateway"
-  fi
+# ── Шаг 6: Запуск ──────────────────────────────────────────────
+# ВСЕГДА авто-определяем режим, игнорируем CMD из Dockerfile
+if [ -n "$ZEROCLAW_TELEGRAM_TOKEN" ] || [ -n "$ZEROCLAW_DISCORD_TOKEN" ]; then
+  echo "[INFO] Mode: DAEMON (channels detected)"
+  echo "[INFO] Telegram: $([ -n "$ZEROCLAW_TELEGRAM_TOKEN" ] && echo 'YES' || echo 'no')"
+  echo "[INFO] Discord: $([ -n "$ZEROCLAW_DISCORD_TOKEN" ] && echo 'YES' || echo 'no')"
+  echo ""
+  echo "[INFO] === Starting DAEMON ==="
+  exec zeroclaw daemon
+else
+  echo "[INFO] Mode: GATEWAY (no channels)"
+  echo ""
+  echo "[INFO] === Starting GATEWAY ==="
+  exec zeroclaw gateway --port "$PORT" --host "0.0.0.0"
 fi
-
-echo "[INFO] Mode: $COMMAND"
-echo "[INFO] Telegram token set: $([ -n "$ZEROCLAW_TELEGRAM_TOKEN" ] && echo 'YES' || echo 'no')"
-echo "[INFO] Discord token set: $([ -n "$ZEROCLAW_DISCORD_TOKEN" ] && echo 'YES' || echo 'no')"
-echo ""
-
-case "$COMMAND" in
-  daemon)
-    echo "[INFO] === Starting DAEMON (gateway + telegram + channels) ==="
-    echo ""
-    exec zeroclaw daemon "$@"
-    ;;
-  gateway)
-    echo "[INFO] === Starting GATEWAY only ==="
-    echo ""
-    exec zeroclaw gateway --port "$PORT" --host "0.0.0.0" "$@"
-    ;;
-  status)
-    exec zeroclaw status "$@"
-    ;;
-  *)
-    exec zeroclaw "$COMMAND" "$@"
-    ;;
-esac
