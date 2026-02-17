@@ -108,7 +108,7 @@ docker push ghcr.io/midujr/zeroclaw-timeweb:latest
 
 ---
 
-## Проверка bash
+## Проверка
 
 ```bash
 curl https://ваш-домен.tw1.ru/health
