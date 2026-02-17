@@ -1,9 +1,7 @@
 name: Build and Push to GHCR
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  workflow_dispatch:  # Только ручной запуск
 
 env:
   REGISTRY: ghcr.io
