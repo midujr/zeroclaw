@@ -1,16 +1,6 @@
-###############################################################################
-# ZeroClaw — Docker Compose для Timeweb App Platform
-# Образ: ghcr.io/midujr/zeroclaw-timeweb:latest
-#
-# Переменные задаются в панели Timeweb:
-#   ZEROCLAW_API_KEY=sk-ваш-ключ
-#   ZEROCLAW_PROVIDER=openrouter
-#   ZEROCLAW_MODEL=anthropic/claude-sonnet-4-20250514
-###############################################################################
-
 services:
   zeroclaw:
-    image: ghcr.io/midujr/zeroclaw-timeweb:latest
+    image: ghcr.io/midujr/zeroclaw-timeweb:v2
     ports:
       - "3000:3000"
     environment:
