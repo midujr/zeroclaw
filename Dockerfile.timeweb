@@ -9,7 +9,7 @@
 #   - Нет volumes (Timeweb их не поддерживает в docker-compose)
 
 # ── Stage 1: Build ──────────────────────────────────────────────
-FROM rust:1.83-slim-bookworm AS builder
+FROM rust:1.93-slim-trixie AS builder
 
 WORKDIR /app
 
@@ -32,7 +32,7 @@ RUN cargo build --release 2>&1 && \
     strip target/release/zeroclaw || true
 
 # ── Stage 2: Runtime ────────────────────────────────────────────
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 # Утилиты для отладки и healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
