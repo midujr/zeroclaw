@@ -1,6 +1,6 @@
 services:
   zeroclaw:
-    image: ghcr.io/midujr/zeroclaw-timeweb:v4
+    image: ghcr.io/midujr/zeroclaw-timeweb:v5
     ports:
       - "3000:3000"
     environment:
@@ -29,4 +29,4 @@ services:
       driver: json-file
       options:
         max-size: "10m"
-        max-file: "4"
+        max-file: "3"

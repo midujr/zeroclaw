@@ -12,8 +12,7 @@ export HOME=/zeroclaw-data
 
 CONFIG="/zeroclaw-data/.zeroclaw/config.toml"
 
-# ── Шаг 1: Генерируем правильный конфиг через onboard ──────────
-# Это создаст config.toml со ВСЕМИ обязательными полями
+# ── Шаг 1: Генерируем конфиг через onboard ─────────────────────
 echo "[INFO] Generating config via zeroclaw onboard..."
 
 API_KEY="${ZEROCLAW_API_KEY:-sk-placeholder}"
@@ -23,16 +22,15 @@ zeroclaw onboard --api-key "$API_KEY" --provider "$PROVIDER" 2>&1 || true
 
 if [ ! -f "$CONFIG" ]; then
   echo "[ERROR] onboard не создал config.toml!"
-  echo "[INFO] Попробуем найти конфиг..."
   find /zeroclaw-data -name "config.toml" 2>/dev/null
   exit 1
 fi
 
 echo "[OK] config.toml создан через onboard"
 
-# ── Шаг 2: Патчим значения из переменных окружения ──────────────
+# ── Шаг 2: Патчим конфиг ───────────────────────────────────────
 
-# API key (если задан настоящий)
+# API key
 if [ -n "$ZEROCLAW_API_KEY" ]; then
   sed -i "s|^api_key = .*|api_key = \"$ZEROCLAW_API_KEY\"|" "$CONFIG"
 fi
@@ -47,9 +45,15 @@ if [ -n "$ZEROCLAW_TEMPERATURE" ]; then
   sed -i "s|^default_temperature = .*|default_temperature = $ZEROCLAW_TEMPERATURE|" "$CONFIG"
 fi
 
-# Gateway: отключаем pairing, разрешаем public bind
-sed -i "s|^require_pairing = .*|require_pairing = ${ZEROCLAW_GATEWAY_REQUIRE_PAIRING:-false}|" "$CONFIG"
-sed -i "s|^allow_public_bind = .*|allow_public_bind = ${ZEROCLAW_GATEWAY_ALLOW_PUBLIC_BIND:-true}|" "$CONFIG"
+# Gateway: ОБЯЗАТЕЛЬНО патчим — onboard ставит require_pairing=true и host=127.0.0.1
+PAIRING="${ZEROCLAW_GATEWAY_REQUIRE_PAIRING:-false}"
+PUBLIC="${ZEROCLAW_GATEWAY_ALLOW_PUBLIC_BIND:-true}"
+PORT="${ZEROCLAW_GATEWAY_PORT:-3000}"
+
+sed -i "s|^require_pairing = .*|require_pairing = $PAIRING|" "$CONFIG"
+sed -i "s|^allow_public_bind = .*|allow_public_bind = $PUBLIC|" "$CONFIG"
+sed -i "s|^port = .*|port = $PORT|" "$CONFIG"
+sed -i "s|^host = .*|host = \"0.0.0.0\"|" "$CONFIG"
 
 # Memory backend
 if [ -n "$ZEROCLAW_MEMORY_BACKEND" ]; then
@@ -67,7 +71,7 @@ if [ -n "$ZEROCLAW_TELEGRAM_TOKEN" ]; then
   else
     TG_USERS=$(echo "$TG_ALLOWED" | sed 's/[[:space:]]*,[[:space:]]*/","/g; s/^/["/; s/$/"]/')
   fi
-  # Удаляем старую секцию если есть
+  # Удаляем старую секцию если есть, добавляем новую
   sed -i '/\[channels_config\.telegram\]/,/^$/d' "$CONFIG"
   printf '\n[channels_config.telegram]\nbot_token = "%s"\nallowed_users = %s\n' \
     "$ZEROCLAW_TELEGRAM_TOKEN" "$TG_USERS" >> "$CONFIG"
@@ -103,15 +107,34 @@ else
   exit 1
 fi
 
-COMMAND="${1:-gateway}"
+# Определяем режим запуска:
+# - Если есть Telegram/Discord токен → daemon (включает каналы + gateway)
+# - Иначе → gateway only
+COMMAND="${1:-auto}"
 shift 2>/dev/null || true
 
+if [ "$COMMAND" = "auto" ]; then
+  if [ -n "$ZEROCLAW_TELEGRAM_TOKEN" ] || [ -n "$ZEROCLAW_DISCORD_TOKEN" ]; then
+    COMMAND="daemon"
+  else
+    COMMAND="gateway"
+  fi
+fi
+
 case "$COMMAND" in
-  gateway)
-    PORT="${ZEROCLAW_GATEWAY_PORT:-3000}"
-    echo "[INFO] Starting gateway on [::]:${PORT}"
+  daemon)
+    echo "[INFO] Starting ZeroClaw DAEMON (gateway + channels)"
+    echo "[INFO] Gateway: 0.0.0.0:${PORT}"
+    echo "[INFO] Telegram: $([ -n "$ZEROCLAW_TELEGRAM_TOKEN" ] && echo 'ENABLED' || echo 'disabled')"
+    echo "[INFO] Discord: $([ -n "$ZEROCLAW_DISCORD_TOKEN" ] && echo 'ENABLED' || echo 'disabled')"
     echo ""
-    exec zeroclaw gateway --port "$PORT" --host "[::]" "$@"
+    exec zeroclaw daemon "$@"
+    ;;
+  gateway)
+    echo "[INFO] Starting ZeroClaw GATEWAY only (no channels)"
+    echo "[INFO] Gateway: 0.0.0.0:${PORT}"
+    echo ""
+    exec zeroclaw gateway --port "$PORT" --host "0.0.0.0" "$@"
     ;;
   status)
     exec zeroclaw status "$@"
