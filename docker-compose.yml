@@ -1,6 +1,6 @@
 services:
   zeroclaw:
-    image: ghcr.io/midujr/zeroclaw-timeweb:v3
+    image: ghcr.io/midujr/zeroclaw-timeweb:v4
     ports:
       - "3000:3000"
     environment:

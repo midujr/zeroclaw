@@ -5,108 +5,97 @@ echo "============================================="
 echo "  ZeroClaw — Timeweb App Platform"
 echo "============================================="
 echo "[INFO] $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-echo "[INFO] RUST_LOG=$RUST_LOG"
 echo ""
 
-# Директории
 mkdir -p /zeroclaw-data/.zeroclaw /zeroclaw-data/workspace 2>/dev/null || true
+export HOME=/zeroclaw-data
 
-# Проверка API ключа
-if [ -z "$ZEROCLAW_API_KEY" ]; then
-  echo "[WARN] ZEROCLAW_API_KEY не задан!"
-  echo "       Задайте переменную в панели Timeweb."
-  echo ""
-fi
-
-# Генерация config.toml
 CONFIG="/zeroclaw-data/.zeroclaw/config.toml"
 
-cat > "$CONFIG" <<'ENDOFCONFIG'
-api_key = "__API_KEY__"
-default_provider = "__PROVIDER__"
-default_model = "__MODEL__"
-default_temperature = __TEMP__
+# ── Шаг 1: Генерируем правильный конфиг через onboard ──────────
+# Это создаст config.toml со ВСЕМИ обязательными полями
+echo "[INFO] Generating config via zeroclaw onboard..."
 
-[memory]
-backend = "__MEMORY__"
-auto_save = true
-embedding_provider = "noop"
+API_KEY="${ZEROCLAW_API_KEY:-sk-placeholder}"
+PROVIDER="${ZEROCLAW_PROVIDER:-openrouter}"
 
-[gateway]
-require_pairing = __PAIRING__
-allow_public_bind = __PUBLIC__
+zeroclaw onboard --api-key "$API_KEY" --provider "$PROVIDER" 2>&1 || true
 
-[autonomy]
-level = "supervised"
-workspace_only = true
-allowed_commands = ["ls", "cat", "grep", "echo"]
-forbidden_paths = ["/etc", "/root", "/proc", "/sys"]
+if [ ! -f "$CONFIG" ]; then
+  echo "[ERROR] onboard не создал config.toml!"
+  echo "[INFO] Попробуем найти конфиг..."
+  find /zeroclaw-data -name "config.toml" 2>/dev/null
+  exit 1
+fi
 
-[runtime]
-kind = "native"
+echo "[OK] config.toml создан через onboard"
 
-[heartbeat]
-enabled = false
+# ── Шаг 2: Патчим значения из переменных окружения ──────────────
 
-[tunnel]
-provider = "none"
+# API key (если задан настоящий)
+if [ -n "$ZEROCLAW_API_KEY" ]; then
+  sed -i "s|^api_key = .*|api_key = \"$ZEROCLAW_API_KEY\"|" "$CONFIG"
+fi
 
-[secrets]
-encrypt = false
+# Model
+if [ -n "$ZEROCLAW_MODEL" ]; then
+  sed -i "s|^default_model = .*|default_model = \"$ZEROCLAW_MODEL\"|" "$CONFIG"
+fi
 
-[browser]
-enabled = false
-ENDOFCONFIG
+# Temperature
+if [ -n "$ZEROCLAW_TEMPERATURE" ]; then
+  sed -i "s|^default_temperature = .*|default_temperature = $ZEROCLAW_TEMPERATURE|" "$CONFIG"
+fi
 
-# Подставляем значения через sed
-sed -i "s|__API_KEY__|${ZEROCLAW_API_KEY:-}|g" "$CONFIG"
-sed -i "s|__PROVIDER__|${ZEROCLAW_PROVIDER:-openrouter}|g" "$CONFIG"
-sed -i "s|__MODEL__|${ZEROCLAW_MODEL:-anthropic/claude-sonnet-4-20250514}|g" "$CONFIG"
-sed -i "s|__TEMP__|${ZEROCLAW_TEMPERATURE:-0.7}|g" "$CONFIG"
-sed -i "s|__MEMORY__|${ZEROCLAW_MEMORY_BACKEND:-sqlite}|g" "$CONFIG"
-sed -i "s|__PAIRING__|${ZEROCLAW_GATEWAY_REQUIRE_PAIRING:-false}|g" "$CONFIG"
-sed -i "s|__PUBLIC__|${ZEROCLAW_GATEWAY_ALLOW_PUBLIC_BIND:-true}|g" "$CONFIG"
+# Gateway: отключаем pairing, разрешаем public bind
+sed -i "s|^require_pairing = .*|require_pairing = ${ZEROCLAW_GATEWAY_REQUIRE_PAIRING:-false}|" "$CONFIG"
+sed -i "s|^allow_public_bind = .*|allow_public_bind = ${ZEROCLAW_GATEWAY_ALLOW_PUBLIC_BIND:-true}|" "$CONFIG"
 
-# Telegram — кавычки вокруг каждого элемента в массиве
+# Memory backend
+if [ -n "$ZEROCLAW_MEMORY_BACKEND" ]; then
+  sed -i "s|^backend = .*|backend = \"$ZEROCLAW_MEMORY_BACKEND\"|" "$CONFIG"
+fi
+
+# ── Шаг 3: Добавляем каналы ────────────────────────────────────
+
+# Telegram
 if [ -n "$ZEROCLAW_TELEGRAM_TOKEN" ]; then
-  echo "[INFO] Telegram channel enabled"
-
-  # Формируем allowed_users: если пусто или *, то ["*"]
+  echo "[INFO] Adding Telegram channel..."
   TG_ALLOWED="${ZEROCLAW_TELEGRAM_ALLOWED:-*}"
   if [ "$TG_ALLOWED" = "*" ]; then
     TG_USERS='["*"]'
   else
-    # Оборачиваем каждый элемент в кавычки: user1,user2 → ["user1", "user2"]
     TG_USERS=$(echo "$TG_ALLOWED" | sed 's/[[:space:]]*,[[:space:]]*/","/g; s/^/["/; s/$/"]/')
   fi
-
+  # Удаляем старую секцию если есть
+  sed -i '/\[channels_config\.telegram\]/,/^$/d' "$CONFIG"
   printf '\n[channels_config.telegram]\nbot_token = "%s"\nallowed_users = %s\n' \
     "$ZEROCLAW_TELEGRAM_TOKEN" "$TG_USERS" >> "$CONFIG"
 fi
 
 # Discord
 if [ -n "$ZEROCLAW_DISCORD_TOKEN" ]; then
-  echo "[INFO] Discord channel enabled"
-
+  echo "[INFO] Adding Discord channel..."
   DC_ALLOWED="${ZEROCLAW_DISCORD_ALLOWED:-*}"
   if [ "$DC_ALLOWED" = "*" ]; then
     DC_USERS='["*"]'
   else
     DC_USERS=$(echo "$DC_ALLOWED" | sed 's/[[:space:]]*,[[:space:]]*/","/g; s/^/["/; s/$/"]/')
   fi
-
+  sed -i '/\[channels_config\.discord\]/,/^$/d' "$CONFIG"
   printf '\n[channels_config.discord]\nbot_token = "%s"\nallowed_users = %s\n' \
     "$ZEROCLAW_DISCORD_TOKEN" "$DC_USERS" >> "$CONFIG"
 fi
 
-# Лог конфига (без секретов)
-echo "[INFO] config.toml:"
+# ── Шаг 4: Лог конфига ─────────────────────────────────────────
+echo ""
+echo "[INFO] Final config.toml:"
 echo "---------------------------------------------"
 sed 's/api_key = ".*"/api_key = "***"/; s/bot_token = ".*"/bot_token = "***"/' "$CONFIG"
 echo "---------------------------------------------"
 echo ""
 
-# Проверка бинарника
+# ── Шаг 5: Проверка и запуск ───────────────────────────────────
 if zeroclaw --help > /dev/null 2>&1; then
   echo "[OK] zeroclaw binary works"
 else
@@ -114,7 +103,6 @@ else
   exit 1
 fi
 
-# Запуск
 COMMAND="${1:-gateway}"
 shift 2>/dev/null || true
 

@@ -1,7 +1,9 @@
 name: Build and Push to GHCR
 
 on:
-  workflow_dispatch:  # Только ручной запуск
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -32,5 +34,5 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v3
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v4
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
