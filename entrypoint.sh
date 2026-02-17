@@ -45,19 +45,32 @@ if [ -n "$ZEROCLAW_TEMPERATURE" ]; then
   sed -i "s|^default_temperature = .*|default_temperature = $ZEROCLAW_TEMPERATURE|" "$CONFIG"
 fi
 
-# Gateway: ОБЯЗАТЕЛЬНО патчим — onboard ставит require_pairing=true и host=127.0.0.1
+# Gateway — полностью перезаписываем секцию [gateway]
 PAIRING="${ZEROCLAW_GATEWAY_REQUIRE_PAIRING:-false}"
 PUBLIC="${ZEROCLAW_GATEWAY_ALLOW_PUBLIC_BIND:-true}"
 PORT="${ZEROCLAW_GATEWAY_PORT:-3000}"
 
-sed -i "s|^require_pairing = .*|require_pairing = $PAIRING|" "$CONFIG"
-sed -i "s|^allow_public_bind = .*|allow_public_bind = $PUBLIC|" "$CONFIG"
-sed -i "s|^port = .*|port = $PORT|" "$CONFIG"
-sed -i "s|^host = .*|host = \"0.0.0.0\"|" "$CONFIG"
+# Удаляем старую секцию [gateway] и всё до следующей секции
+sed -i '/^\[gateway\]/,/^\[/{/^\[gateway\]/d;/^\[/!d}' "$CONFIG"
 
-# Memory backend
-if [ -n "$ZEROCLAW_MEMORY_BACKEND" ]; then
-  sed -i "s|^backend = .*|backend = \"$ZEROCLAW_MEMORY_BACKEND\"|" "$CONFIG"
+# Вставляем новую секцию [gateway] перед [autonomy] или в конец
+if grep -q '^\[autonomy\]' "$CONFIG"; then
+  sed -i "/^\[autonomy\]/i\\
+[gateway]\\
+host = \"0.0.0.0\"\\
+port = ${PORT}\\
+require_pairing = ${PAIRING}\\
+allow_public_bind = ${PUBLIC}\\
+" "$CONFIG"
+else
+  cat >> "$CONFIG" <<EOF
+
+[gateway]
+host = "0.0.0.0"
+port = ${PORT}
+require_pairing = ${PAIRING}
+allow_public_bind = ${PUBLIC}
+EOF
 fi
 
 # ── Шаг 3: Добавляем каналы ────────────────────────────────────
@@ -71,7 +84,6 @@ if [ -n "$ZEROCLAW_TELEGRAM_TOKEN" ]; then
   else
     TG_USERS=$(echo "$TG_ALLOWED" | sed 's/[[:space:]]*,[[:space:]]*/","/g; s/^/["/; s/$/"]/')
   fi
-  # Удаляем старую секцию если есть, добавляем новую
   sed -i '/\[channels_config\.telegram\]/,/^$/d' "$CONFIG"
   printf '\n[channels_config.telegram]\nbot_token = "%s"\nallowed_users = %s\n' \
     "$ZEROCLAW_TELEGRAM_TOKEN" "$TG_USERS" >> "$CONFIG"
@@ -99,7 +111,7 @@ sed 's/api_key = ".*"/api_key = "***"/; s/bot_token = ".*"/bot_token = "***"/' "
 echo "---------------------------------------------"
 echo ""
 
-# ── Шаг 5: Проверка и запуск ───────────────────────────────────
+# ── Шаг 5: Проверка бинарника ──────────────────────────────────
 if zeroclaw --help > /dev/null 2>&1; then
   echo "[OK] zeroclaw binary works"
 else
@@ -107,9 +119,7 @@ else
   exit 1
 fi
 
-# Определяем режим запуска:
-# - Если есть Telegram/Discord токен → daemon (включает каналы + gateway)
-# - Иначе → gateway only
+# ── Шаг 6: Определяем и запускаем режим ────────────────────────
 COMMAND="${1:-auto}"
 shift 2>/dev/null || true
 
@@ -121,18 +131,19 @@ if [ "$COMMAND" = "auto" ]; then
   fi
 fi
 
+echo "[INFO] Mode: $COMMAND"
+echo "[INFO] Telegram token set: $([ -n "$ZEROCLAW_TELEGRAM_TOKEN" ] && echo 'YES' || echo 'no')"
+echo "[INFO] Discord token set: $([ -n "$ZEROCLAW_DISCORD_TOKEN" ] && echo 'YES' || echo 'no')"
+echo ""
+
 case "$COMMAND" in
   daemon)
-    echo "[INFO] Starting ZeroClaw DAEMON (gateway + channels)"
-    echo "[INFO] Gateway: 0.0.0.0:${PORT}"
-    echo "[INFO] Telegram: $([ -n "$ZEROCLAW_TELEGRAM_TOKEN" ] && echo 'ENABLED' || echo 'disabled')"
-    echo "[INFO] Discord: $([ -n "$ZEROCLAW_DISCORD_TOKEN" ] && echo 'ENABLED' || echo 'disabled')"
+    echo "[INFO] === Starting DAEMON (gateway + telegram + channels) ==="
     echo ""
     exec zeroclaw daemon "$@"
     ;;
   gateway)
-    echo "[INFO] Starting ZeroClaw GATEWAY only (no channels)"
-    echo "[INFO] Gateway: 0.0.0.0:${PORT}"
+    echo "[INFO] === Starting GATEWAY only ==="
     echo ""
     exec zeroclaw gateway --port "$PORT" --host "0.0.0.0" "$@"
     ;;
